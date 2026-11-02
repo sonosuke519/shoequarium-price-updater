@@ -4,7 +4,14 @@ on:
   schedule:
     # UTC 18:00 / 06:00 = Japan 03:00 / 15:00. GitHub may delay starts.
     - cron: '0 6,18 * * *'
+    # Backup checks resume a missed/failed run; a finished slot makes no price requests.
+    - cron: '30 6,18 * * *'
   workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Verify stored results without requesting price updates
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +39,7 @@ jobs:
         env:
           SITE_URL: https://oysteryakiniku.com
           RETAIL_AUTOMATION_KEY: ${{ secrets.RETAIL_AUTOMATION_KEY }}
+          VERIFY_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_only && 'true' || 'false' }}
   record-activity:
     needs: update
     runs-on: ubuntu-latest

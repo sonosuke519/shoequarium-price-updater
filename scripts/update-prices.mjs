@@ -3,12 +3,28 @@ import { pathToFileURL } from 'node:url';
 const PROVIDERS = ['rakuten', 'yahoo'];
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+export function latestScheduledSlot(time) {
+  const date = new Date(time), hour = date.getUTCHours();
+  date.setUTCHours(hour >= 18 ? 18 : hour >= 6 ? 6 : 18, 0, 0, 0);
+  if (hour < 6) date.setUTCDate(date.getUTCDate() - 1);
+  return date.getTime();
+}
+
+function alreadyComplete(status, currentTime, since) {
+  return Number.isInteger(status.models) && status.models > 0 && PROVIDERS.every(provider => {
+    const value = status.providers?.[provider], job = value?.job;
+    const age = currentTime - Date.parse(value?.oldestCheckedAt);
+    return job?.status === 'completed' && job.failed === 0 && job.completed === status.models && job.modelCount === status.models && value.current === status.models && Number.isFinite(age) && age >= 0 && age < 24 * 3600_000 && Date.parse(job.finishedAt) >= since;
+  });
+}
+
 export async function updatePrices({
   key = process.env.RETAIL_AUTOMATION_KEY,
   site = process.env.SITE_URL || 'https://oysteryakiniku.com',
   fetcher = fetch, delay = pause, now = Date.now,
   log = value => console.log(JSON.stringify(value)),
   maxDurationMs = 210 * 60_000,
+  completedSince, verifyOnly = false,
 } = {}) {
   if (!/^[a-f0-9]{64}$/.test(key || '')) throw Error('missing_or_invalid_update_credential');
   const origin = new URL(site);
@@ -41,6 +57,15 @@ export async function updatePrices({
       if (![200, 409].includes(response.status)) throw Error(`site_http_${response.status}`);
       try { return await response.json(); } catch { throw Error('invalid_site_response'); }
     }
+  }
+
+  if (verifyOnly || completedSince !== undefined) {
+    const previous = await request();
+    if (alreadyComplete(previous, now(), verifyOnly ? 0 : completedSince)) {
+      log({ verified: true, reused: true, models: previous.models, displayableModels: previous.catalog?.displayableModels, pricedModels: previous.catalog?.pricedModels });
+      return previous;
+    }
+    if (verifyOnly) throw Error('persisted_update_verification_failed');
   }
 
   async function updateProvider(provider) {
@@ -82,7 +107,7 @@ export async function updatePrices({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try { await updatePrices(); } catch (error) {
+  try { await updatePrices({ verifyOnly: process.env.VERIFY_ONLY === 'true', ...(process.env.GITHUB_EVENT_NAME === 'schedule' ? { completedSince: latestScheduledSlot(Date.now()) } : {}) }); } catch (error) {
     // Only our controlled error codes may reach this public log.
     console.error(/^[a-z0-9_]+$/.test(error?.message || '') ? error.message : 'price_update_failed');
     process.exitCode = 1;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { updatePrices } from './scripts/update-prices.mjs';
+import { updatePrices, latestScheduledSlot } from './scripts/update-prices.mjs';
 
 const key='a'.repeat(64),providers=['rakuten','yahoo'];
 const progress=(provider,completed=3,extra={})=>({provider,jobId:provider+'-job',completed,total:3,failed:0,status:completed===3?'completed':'running',done:completed===3,...extra});
@@ -45,4 +45,26 @@ test('authentication failures are not retried or exposed as response bodies',asy
 test('stops within the deadline when another worker continuously holds the lease',async()=>{
  let clock=0;
  await assert.rejects(()=>updatePrices({key,now:()=>clock,maxDurationMs:1000,delay:async ms=>{clock+=ms;},log:()=>{},fetcher:async(_,init)=>init.body?json({busy:true},409):json(status())}),/deadline_exceeded/);
+});
+
+test('the backup checks completion without issuing another price-update request',async()=>{
+ const previous=status(),since=Date.now()-60_000;for(const p of providers)previous.providers[p].job.finishedAt=new Date().toISOString();
+ let calls=0;
+ await updatePrices({key,completedSince:since,log:()=>{},fetcher:async(_,init)=>{calls++;assert.equal(init.method,'GET');return json(previous);}});
+ assert.equal(calls,1);
+ const stale=status();for(const p of providers)stale.providers[p].job.finishedAt=new Date(since-60_000).toISOString();
+ let posts=0;
+ await updatePrices({key,completedSince:since,log:()=>{},fetcher:async(_,init)=>{if(init.body){posts++;return json(progress(JSON.parse(init.body).provider));}return json(stale);}});
+ assert.equal(posts,2);
+});
+
+test('verification-only mode never updates incomplete saved results',async()=>{
+ const partial=status();partial.providers.yahoo.current=2;
+ await assert.rejects(()=>updatePrices({key,verifyOnly:true,log:()=>{},fetcher:async(_,init)=>{assert.equal(init.method,'GET');return json(partial);}}),/verification_failed/);
+});
+
+test('Japan 03:00 and 15:00 slots handle the UTC day boundary and delayed starts',()=>{
+ assert.equal(new Date(latestScheduledSlot(Date.parse('2026-11-02T05:59:00Z'))).toISOString(),'2026-11-01T18:00:00.000Z');
+ assert.equal(new Date(latestScheduledSlot(Date.parse('2026-11-02T06:30:00Z'))).toISOString(),'2026-11-02T06:00:00.000Z');
+ assert.equal(new Date(latestScheduledSlot(Date.parse('2026-11-02T18:30:00Z'))).toISOString(),'2026-11-02T18:00:00.000Z');
 });

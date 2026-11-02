@@ -5,6 +5,10 @@ Calls an authenticated, bounded update endpoint twice daily at 03:00 and
 only the caller and its tests: no Site source, model dictionary, market data,
 marketplace API credentials, or AI execution.
 
+Backup checks at 03:30 / 15:30 resume a missed or failed run. They verify the
+current half-day slot first and make no price requests if it already finished.
+Backups share the same concurrency group as the primary runs.
+
 The public repository uses standard `ubuntu-latest` GitHub-hosted runners,
 which do not consume the shared private-repository compute allowance.
 No artifacts or dependency caches are uploaded.
@@ -32,6 +36,7 @@ No artifacts or dependency caches are uploaded.
   Only this job has repository write permission; it has no Site credential.
 
 Run manually from Actions → Update ShoeQuarium prices → Run workflow.
+Select `verify_only` for a read-only check of the stored results.
 After a credential is revoked or changed, update the GitHub secret and the
 Site's digest together. Routine scheduled runs require no user sign-in.
 
