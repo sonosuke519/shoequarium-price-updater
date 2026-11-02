@@ -1,0 +1,7 @@
+{
+  "name": "shoequarium-price-updater",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test", "update": "node scripts/update-prices.mjs" }
+}

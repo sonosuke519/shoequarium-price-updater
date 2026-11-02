@@ -1,0 +1,48 @@
+name: Update ShoeQuarium prices
+
+on:
+  schedule:
+    # UTC 18:00 / 06:00 = Japan 03:00 / 15:00. GitHub may delay starts.
+    - cron: '0 6,18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shoequarium-retail-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'sonosuke519/shoequarium-price-updater'
+    runs-on: ubuntu-latest
+    timeout-minutes: 225
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Verify updater
+        run: node --test
+      - name: Update and verify both providers
+        run: node scripts/update-prices.mjs
+        env:
+          SITE_URL: https://oysteryakiniku.com
+          RETAIL_AUTOMATION_KEY: ${{ secrets.RETAIL_AUTOMATION_KEY }}
+  record-activity:
+    needs: update
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Record monthly successful operation
+        run: node scripts/record-success.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
